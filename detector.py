@@ -1,54 +1,85 @@
 import cv2
+import numpy as np
 
 
 class QualityInspector:
-    def __init__(self, threshold_area=500):
-        self.threshold_area = threshold_area
+    def __init__(self, min_defect_area=150):
+        self.min_defect_area = min_defect_area
 
-    def inspect(self, image):
-
+    def preprocess(self, image):
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
-        _, thresh = cv2.threshold(
+        thresh = cv2.adaptiveThreshold(
             blurred,
-            120,
             255,
-            cv2.THRESH_BINARY_INV
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV,
+            11,
+            2,
         )
+
+        kernel = np.ones((3, 3), np.uint8)
+
+        opening = cv2.morphologyEx(
+            thresh,
+            cv2.MORPH_OPEN,
+            kernel,
+            iterations=2,
+        )
+
+        cleaned = cv2.morphologyEx(
+            opening,
+            cv2.MORPH_CLOSE,
+            kernel,
+            iterations=2,
+        )
+
+        return cleaned
+
+    def detect_defects(self, image):
+
+        processed = self.preprocess(image)
 
         contours, _ = cv2.findContours(
-            thresh,
+            processed,
             cv2.RETR_EXTERNAL,
-            cv2.CHAIN_APPROX_SIMPLE
+            cv2.CHAIN_APPROX_SIMPLE,
         )
 
-        defects = 0
-
         output = image.copy()
+
+        defects = []
 
         for contour in contours:
 
             area = cv2.contourArea(contour)
 
-            if area > self.threshold_area:
+            if area < self.min_defect_area:
+                continue
 
-                defects += 1
+            x, y, w, h = cv2.boundingRect(contour)
 
-                x, y, w, h = cv2.boundingRect(contour)
+            defects.append((x, y, w, h))
 
-                cv2.rectangle(
-                    output,
-                    (x, y),
-                    (x + w, y + h),
-                    (0, 0, 255),
-                    2
-                )
+            cv2.rectangle(
+                output,
+                (x, y),
+                (x + w, y + h),
+                (0, 0, 255),
+                2,
+            )
+
+        return output, defects
+
+    def inspect(self, image):
+
+        result, defects = self.detect_defects(image)
 
         status = "PASS"
 
-        if defects > 0:
+        if len(defects) > 0:
             status = "FAIL"
 
-        return output, status, defects
+        return result, status, len(defects)
